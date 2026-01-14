@@ -321,7 +321,7 @@ class CommonMujocoSim:
         self.show_viewer = show_viewer
 
         self.task = task
-        assert self.task in ["cube", "cube_size", "cube_distractor", "cube_specified", "open", "dishwasher"]
+        assert self.task in ["cube", "cube_cam_mounts", "cube_size", "cube_distractor", "cube_specified", "open", "dishwasher"]
 
         # Enable gravity compensation for everything except objects
         self.model.body_gravcomp[:] = 1.0
@@ -382,7 +382,7 @@ class CommonMujocoSim:
     def reset_task(self):
 
         ## Task specific randomizations
-        if self.task == "cube":
+        if self.task in ["cube", "cube_cam_mounts"]:
             randomized_position = np.random.uniform(
                 low=(0.5, -0.2, 0), high=(1.3, 0.2, 0), size=3
             )
@@ -519,7 +519,7 @@ class CommonMujocoSim:
             ] += randomized_position
 
     def is_success(self):
-        if self.task in ["cube", "cube_size", "cube_distractor"]:
+        if self.task in ["cube", "cube_cam_mounts", "cube_size", "cube_distractor"]:
             ### Check whether the cube is lifted off the floor by 10cm
             interactive_body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "interactive_obj")
             cube_pos = self.data.xpos[interactive_body_id]
@@ -589,6 +589,9 @@ class MujocoEnvConfig:
     ])
     min_bound: list[float] = field(default_factory=list)
     max_bound: list[float] = field(default_factory=list)
+    # WBC IK solver options
+    base_immobile: bool = False
+    collision_avoidance: bool = False
 
 class CommonMujocoEnv:
     def __init__(self, cfg: MujocoEnvConfig, render_images=True, show_viewer=True, show_images=False):
@@ -605,8 +608,8 @@ class CommonMujocoEnv:
 
         self.task = self.cfg.task
         
-        assert self.task in ["cube", "cube_size", "cube_distractor", "cube_specified", "open", "dishwasher"]
-        if self.task in ["cube", "cube_size", "cube_distractor", "cube_specified"]:
+        assert self.task in ["cube", "cube_cam_mounts", "cube_size", "cube_distractor", "cube_specified", "open", "dishwasher"]
+        if self.task in ["cube", "cube_cam_mounts", "cube_size", "cube_distractor", "cube_specified"]:
             self.max_num_step = 325
         elif self.task == "open":
             self.max_num_step = 800
@@ -615,6 +618,7 @@ class CommonMujocoEnv:
 
         TASK_TO_MJCF_PATH = {
             'cube': "mj_assets/stanford_tidybot2/cube.xml",
+            'cube_cam_mounts': "mj_assets/stanford_tidybot2/cube_cam_mounts.xml",
             'cube_size': "mj_assets/stanford_tidybot2/cube_size.xml",
             'cube_distractor': "mj_assets/stanford_tidybot2/cube_distractor.xml",
             'cube_specified': "mj_assets/stanford_tidybot2/cube_specified.xml",

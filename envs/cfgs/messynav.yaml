@@ -1,0 +1,16 @@
+wbc: 1
+cameras:
+  - viewer
+  - base1
+  - base2
+  - wrist
+pcl_cameras:
+  - base1
+  - base2
+task: cube_cam_mounts
+data_folder: dev1
+min_bound: [-inf, -inf, 0.02]
+max_bound: [inf, inf, inf]
+# WBC IK solver options
+base_immobile: true
+collision_avoidance: true

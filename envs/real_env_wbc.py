@@ -1,5 +1,5 @@
 from envs.common_real_env import CommonRealEnv, RealEnvConfig
-from envs.utils.wbc_ik_solver_real import IKSolver
+from envs.utils.wbc_ik_solver import IKSolver
 from scipy.spatial.transform import Rotation as R
 import numpy as np
 from constants import ARM_X_OFFSET, BASE_HEIGHT
@@ -8,7 +8,11 @@ class RealEnv(CommonRealEnv):
     def __init__(self, cfg: RealEnvConfig):
         super().__init__(cfg)
         assert(self.cfg.wbc)
-        self.wbc_ik_solver = IKSolver()
+        self.wbc_ik_solver = IKSolver(
+            base_immobile=False,
+            collision_avoidance=False,
+            posture_cost=2e-3,
+        )
         self.RESET_QPOS = np.array([0., 0., 0., 0., -0.34906585, 3.14159265, -2.54818071, 0., -0.87266463, 1.57079633, 0., 0., 0., 0., 0., 0., 0., 0.])
         self.arm_base_offset = [ARM_X_OFFSET, 0, BASE_HEIGHT] # arm is forward (0.1199m) and raised by base height (0.3948m)
 

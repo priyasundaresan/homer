@@ -230,6 +230,38 @@ python interactive_scripts/record_sim.py --env_cfg envs/cfgs/cube_wbc.yaml # Lin
 # OR
 mjpython interactive_scripts/record_sim.py --env_cfg envs/cfgs/cube_wbc.yaml # Mac
 ```
+
+#### WBC Environment Options
+
+The following options can be added to your environment config YAML (e.g., `envs/cfgs/cube_wbc.yaml`):
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `base_immobile` | `false` | If `true`, locks the base in place (IK solves with arm only) |
+| `collision_avoidance` | `false` | If `true`, enables collision avoidance between arm/gripper and base/camera mounts |
+
+To use collision avoidance with camera mounts, use the `cube_cam_mounts` task which includes the camera mount geometry:
+```bash
+mjpython interactive_scripts/record_sim.py --env_cfg envs/cfgs/messynav.yaml
+```
+
+Example config with collision avoidance (`envs/cfgs/messynav.yaml`):
+```yaml
+wbc: 1
+cameras:
+  - viewer
+  - base1
+  - base2
+  - wrist
+pcl_cameras:
+  - base1
+  - base2
+task: cube_cam_mounts
+data_folder: dev1
+# WBC IK solver options
+base_immobile: true        # Lock base during IK
+collision_avoidance: true  # Enable collision avoidance
+```
 ![Teleop Demo](readme_assets/teleop.gif)
 - Install the [XRBrowser](https://apps.apple.com/us/app/xr-browser/id1588029989) iPhone App
 - Ensure your iPhone is on the same Wi-Fi network as your laptop/machine.

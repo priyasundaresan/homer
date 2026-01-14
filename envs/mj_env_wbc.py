@@ -12,7 +12,7 @@ from ruckig import Result
 from constants import POLICY_CONTROL_PERIOD
 from interactive_scripts.dataset_recorder import ActMode
 from teleop.policies import TeleopPolicy
-from envs.utils.wbc_ik_solver_sim import IKSolver
+from envs.utils.wbc_ik_solver import IKSolver
 from envs.common_mj_env import (
     ArmController,
     BaseController,
@@ -30,7 +30,11 @@ class MujocoSim(CommonMujocoSim):
         super().__init__(task, mjcf_path, command_queue, shm_state, show_viewer)
         self.cfg = cfg
 
-        self.wbc_ik_solver = IKSolver(self.cfg.arm_reset_qpos)
+        self.wbc_ik_solver = IKSolver(
+            reset_qpos=self.cfg.arm_reset_qpos,
+            base_immobile=self.cfg.base_immobile,
+            collision_avoidance=self.cfg.collision_avoidance,
+        )
 
         # Cache references to array slices
         self.arm_dofs = arm_dofs = 7
