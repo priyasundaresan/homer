@@ -759,8 +759,7 @@ class CommonMujocoEnv:
                 renderer.render()
                 renderer.get_params()
             render_time = time.time() - start_time
-            if render_time > 0.1:  # 10 fps
-                print(f'Warning: Offscreen rendering took {1000 * render_time:.1f} ms, try making the Mujoco viewer window smaller to speed up offscreen rendering')
+            pass
 
     def visualizer_loop(self):
         shm_images = [ShmImage(existing_instance=shm_image) for shm_image in self.shm_images_rgb]
