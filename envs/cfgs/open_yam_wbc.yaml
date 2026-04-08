@@ -9,7 +9,7 @@ pcl_cameras:
   - base1
   - base2
 task: open
-data_folder: yam_dev1
+data_folder: dev1
 arm_reset_qpos: [0.0, 1.047, 1.047, 0.0, 0.0, 0.0]
 min_bound: [-inf, -inf, 0.02]
 max_bound: [inf, inf, inf]

@@ -124,10 +124,17 @@ def main():
     args = parser.parse_args()
 
     env_cfg = pyrallis.load(MujocoEnvConfig, open(args.env_cfg, "r"))
-    if env_cfg.wbc:
-        from envs.mj_env_wbc import MujocoEnv
+    robot = getattr(env_cfg, 'robot', 'kinova')
+    if robot == 'yam':
+        if env_cfg.wbc:
+            from envs.mj_env_wbc_yam import MujocoEnv
+        else:
+            from envs.mj_env_base_arm_yam import MujocoEnv
     else:
-        from envs.mj_env_base_arm import MujocoEnv
+        if env_cfg.wbc:
+            from envs.mj_env_wbc import MujocoEnv
+        else:
+            from envs.mj_env_base_arm import MujocoEnv
 
     print(f">>>>>>>>>>{args.dense_model}<<<<<<<<<<")
     dense_policy, dense_dataset, _ = load_model(args.dense_model, "cuda", load_only_one=True)

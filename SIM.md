@@ -52,8 +52,8 @@ Locally, `homer/data` should now contain datasets such as `homer/data/dev_<cube/
 
 Our paper introduces two key agent variants:
 
-- **HoMeR**: combines a keypose policy and a dense policy under a whole-body control (WBC) action space. The keypose policy predicts both salient points and end-effector actions.
-- **HoMeR-Cond**: a variant of HoMeR where the keypose policy is externally conditioned on salient points at test time, rather than predicting them.
+- **HoMeR**: combines a waypoint policy and a dense policy under a whole-body control (WBC) action space. The waypoint policy predicts both salient points and end-effector actions.
+- **HoMeR-Cond**: a variant of HoMeR where the waypoint policy is externally conditioned on salient points at test time, rather than predicting them.
 
 We compare against approaches which:
 - Use decoupled base+arm control instead of WBC (**HoMeR-B+A**)
@@ -65,7 +65,7 @@ We compare against approaches which:
 #### Train HoMeR
 
 ```bash
-# WBC keypose policy (predicts salient points + actions)
+# WBC waypoint policy (predicts salient points + actions)
 python scripts/train_waypoint.py --config_path cfgs/waypoint/cabinet_wbc.yaml
 
 # WBC dense policy
@@ -79,7 +79,7 @@ python scripts/train_dense.py --config_path cfgs/dense/cabinet_wbc_allcams.yaml
 #### Train Baselines (B+A Keypose and Dense)
 
 ```bash
-# B+A keypose policy
+# B+A waypoint policy
 python scripts/train_waypoint.py --config_path cfgs/waypoint/cabinet_base_arm.yaml
 
 # B+A dense policy
@@ -110,7 +110,7 @@ These same commands will work for any other simulated task by updating the confi
 #### Train HoMeR-cond
 
 ```bash
-# WBC keypose policy, externally conditioned on salient points
+# WBC waypoint policy, externally conditioned on salient points
 python scripts/train_waypoint_cond.py --config_path cfgs/waypoint/cube_wbc_cond.yaml
 ```
 
@@ -118,7 +118,7 @@ python scripts/train_waypoint_cond.py --config_path cfgs/waypoint/cube_wbc_cond.
 - `exps/waypoint/cube_wbc_cond`
 
 ---
-We train all models across `l40s` or `a40` GPUs. The dense policies can be trained on smaller GPUs like `a40` or `a5000` within a few hours. The keypose model is a larger transformer, and we train it on a single `l40s` GPU (<6 hours). See the provided example scripts in `sbatch_scripts/` to launch training jobs on a cluster with SLURM.
+We train all models across `l40s` or `a40` GPUs. The dense policies can be trained on smaller GPUs like `a40` or `a5000` within a few hours. The waypoint model is a larger transformer, and we train it on a single `l40s` GPU (<6 hours). See the provided example scripts in `sbatch_scripts/` to launch training jobs on a cluster with SLURM.
 
 ## Evaluation
 
@@ -324,10 +324,7 @@ Rename this folder to something more descriptive, move it to `data/`, and update
 
 ## YAM Robot
 
-HoMeR supports the YAM 6-DOF arm on the TidyBot2 mobile base as an alternative to the Kinova Gen3.
-All three sim tasks (cube, dishwasher, cabinet) are supported in both WBC and base-arm modes.
-
-### Environment configs
+HoMeR supports the YAM 6-DOF arm as an alternative to the Kinova Gen3. The workflow is identical — just use a YAM config:
 
 | Task | WBC | Base+Arm |
 |------|-----|----------|
@@ -335,50 +332,12 @@ All three sim tasks (cube, dishwasher, cabinet) are supported in both WBC and ba
 | Dishwasher | `envs/cfgs/dishwasher_yam_wbc.yaml` | `envs/cfgs/dishwasher_yam_base_arm.yaml` |
 | Cabinet | `envs/cfgs/open_yam_wbc.yaml` | `envs/cfgs/open_yam_base_arm.yaml` |
 
-All YAM configs include `robot: yam` and `arm_reset_qpos: [0.0, 1.047, 1.047, 0.0, 0.0, 0.0]`.
-
-### Data collection
-
-Identical to the Kinova workflow — just pass a YAM config:
-
 ```bash
-# Mac
-mjpython interactive_scripts/record_sim.py --env_cfg envs/cfgs/cube_yam_wbc.yaml
-
-# Linux
-python interactive_scripts/record_sim.py --env_cfg envs/cfgs/cube_yam_wbc.yaml
+mjpython interactive_scripts/record_sim.py --env_cfg envs/cfgs/cube_yam_wbc.yaml  # Mac
+python interactive_scripts/record_sim.py --env_cfg envs/cfgs/cube_yam_wbc.yaml    # Linux
 ```
 
-The iPhone teleoperation interface is unchanged:
-- Center press → EE control
-- Right press → Base control
-- Swipe up → close gripper / swipe down → open gripper
-
-Demos are saved to the `data_folder` specified in the config (default: `yam_dev1/`).
-
-### Replay
-
-```bash
-mjpython interactive_scripts/replay_sim.py --data_dir yam_dev1
-```
-
-### Gripper convention
-
-The YAM gripper uses the same `0 = open, 1 = closed` convention as the Kinova, so teleop and
-training code are identical. Internally, the YAM left-finger joint position is inverted
-(`gripper_pos = 1 - joint_pos / 0.041`) to match this convention.
-
-### Notes on WBC IK
-
-The YAM WBC IK solver (`envs/utils/wbc_ik_solver_yam.py`) uses `mink` with:
-- 6 arm DOFs (`joint1`–`joint6`)
-- Max arm velocity 80 deg/s for all joints
-- End-effector site: `pinch_site` on `link_6`
-- Collision avoidance between the `arm` subtree and `base_link`
-
-The base-arm IK solver (`envs/utils/arm_ik_solver_yam.py`) is a Jacobian damped-least-squares
-solver that fixes the base at the origin and solves only arm joints, matching the Kinova
-`arm_ik_solver.py` interface.
+Demos save to `dev1/` (same as Kinova). All subsequent steps (mode annotation, salient point annotation, training, eval) are unchanged.
 
 ---
 
