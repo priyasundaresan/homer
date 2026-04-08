@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Mode Annotator</title>
+  <title>HoMeR Mode Annotator</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -110,7 +110,7 @@
   </style>
 </head>
 <body>
-  <h2>Interactive Video Annotator</h2>
+  <h2>HoMeR Mode Annotator</h2>
   <h3 id="demo-name">Loading...</h3>
   <div id="instructions">
     Click and drag on the bar below to create waypoint segments.<br/>
@@ -142,7 +142,7 @@
   <script>
     let currentFrame = 0;
     let frameCount = {{ frame_count }};
-    let segments = [];
+    let segments = [{ start: 0, end: Math.floor(frameCount / 2) }];
     let isDraggingSegment = false;
     let dragStartFrame = null;
     let lastScrubFrame = -1;
@@ -325,6 +325,7 @@
       updateFrame();
       updateAnnotationBar();
       updateModeBar();
+      saveAllAnnotations();
       document.getElementById("export-button").addEventListener("click", exportAnnotations);
 
       window.addEventListener("keydown", function (e) {

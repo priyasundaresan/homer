@@ -1,4 +1,5 @@
 import os
+import pickle
 import shutil
 import threading
 from flask import Flask, render_template, request, jsonify
@@ -8,7 +9,7 @@ from io import BytesIO
 from PIL import Image
 import base64
 
-from interactive_scripts.dataset_recorder import ActMode, load_episode, save_episode
+from interactive_scripts.dataset_recorder import ActMode
 
 app = Flask(__name__)
 annotations = []
@@ -19,7 +20,8 @@ export_event = threading.Event()
 
 def load_demo(episode_fn):
     global demo_name
-    demo = load_episode(episode_fn)
+    with open(episode_fn, "rb") as fp:
+        demo = pickle.load(fp)
     demo_name = episode_fn
     return demo
 
@@ -37,7 +39,7 @@ def load_frames(demo):
 def relabel_demo(demo, annotations_list):
     for t, step in enumerate(demo):
         step['mode'] = annotations_list[t]
-        step['waypoint_idx'] = -1  # no waypoint_idx concept anymore
+        step['waypoint_idx'] = -1
         print(t, step['mode'])
     return demo
 
@@ -58,7 +60,7 @@ def get_demo_name():
 @app.route('/save_annotation', methods=['POST'])
 def save_annotation():
     global annotations
-    annotations = request.json  # frontend sends a list directly now
+    annotations = request.json
     return jsonify({"status": "success"})
 
 @app.route('/frames/<int:frame_id>')
@@ -117,7 +119,7 @@ if __name__ == '__main__':
     print('Go to http://127.0.0.1:5001')
 
     for fn in sorted(os.listdir(demo_dir)):
-        if 'pkl' in fn and fn not in os.listdir(relabel_dir):
+        if 'pkl' in fn and not fn in os.listdir(relabel_dir):
             episode_fn = os.path.join(demo_dir, fn)
             print('Annotating:', episode_fn)
             demo = load_demo(episode_fn)
@@ -133,8 +135,8 @@ if __name__ == '__main__':
 
             annotations_result = get_annotations(demo)
             demo_relabeled = relabel_demo(demo, annotations_result)
-            save_episode(demo_relabeled, episode_fn.replace(demo_dir, relabel_dir))
+            with open(episode_fn.replace(demo_dir, relabel_dir), "wb") as f:
+                pickle.dump(demo_relabeled, f)
 
             stop_flask()
             flask_thread.join()
-
