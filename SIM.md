@@ -259,7 +259,7 @@ pcl_cameras:
 task: cube_cam_mounts
 data_folder: dev1
 # WBC IK solver options
-base_immobile: true        # Lock base during IK
+base_immobile: false       # Set to true to lock base during IK
 collision_avoidance: true  # Enable collision avoidance
 ```
 ![Teleop Demo](readme_assets/teleop.gif)
