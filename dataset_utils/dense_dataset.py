@@ -2,12 +2,11 @@ from dataclasses import dataclass
 from collections import defaultdict, namedtuple
 import os
 import numpy as np
-import pickle
 import torch
 import torchvision.transforms as transforms
 
 from common_utils import get_all_files
-from interactive_scripts.dataset_recorder import ActMode
+from interactive_scripts.dataset_recorder import ActMode, load_episode
 from scipy.spatial.transform import Rotation as R
 
 class DenseInputProcessor:
@@ -119,9 +118,7 @@ class DenseDataset:
 
             success_msg = ""
 
-            #raw_episode = np.load(f, allow_pickle=True)["arr_0"]
-            with open(f, "rb") as fp:
-                raw_episode = pickle.load(fp)
+            raw_episode = load_episode(f)
 
             episode = []
 

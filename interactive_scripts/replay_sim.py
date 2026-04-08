@@ -19,6 +19,6 @@ if __name__ == "__main__":
         from envs.mj_env_base_arm import MujocoEnv
 
     env = MujocoEnv(env_cfg)
-    for fn in os.listdir(data_dir):
-        if 'pkl' in fn:
+    for fn in sorted(os.listdir(data_dir)):
+        if fn.endswith('.pkl'):
             env.replay_episode(os.path.join(data_dir, fn), replay_mode=args.mode)

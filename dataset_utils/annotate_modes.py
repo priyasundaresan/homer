@@ -1,5 +1,4 @@
 import os
-import pickle
 import shutil
 import threading
 from flask import Flask, render_template, request, jsonify
@@ -9,7 +8,7 @@ from io import BytesIO
 from PIL import Image
 import base64
 
-from interactive_scripts.dataset_recorder import ActMode
+from interactive_scripts.dataset_recorder import ActMode, load_episode, save_episode
 
 app = Flask(__name__)
 annotations = []
@@ -20,8 +19,7 @@ export_event = threading.Event()
 
 def load_demo(episode_fn):
     global demo_name
-    with open(episode_fn, "rb") as fp:
-        demo = pickle.load(fp)
+    demo = load_episode(episode_fn)
     demo_name = episode_fn
     return demo
 
@@ -119,7 +117,7 @@ if __name__ == '__main__':
     print('Go to http://127.0.0.1:5001')
 
     for fn in sorted(os.listdir(demo_dir)):
-        if 'pkl' in fn and not fn in os.listdir(relabel_dir):
+        if 'pkl' in fn and fn not in os.listdir(relabel_dir):
             episode_fn = os.path.join(demo_dir, fn)
             print('Annotating:', episode_fn)
             demo = load_demo(episode_fn)
@@ -135,8 +133,7 @@ if __name__ == '__main__':
 
             annotations_result = get_annotations(demo)
             demo_relabeled = relabel_demo(demo, annotations_result)
-            with open(episode_fn.replace(demo_dir, relabel_dir), "wb") as f:
-                pickle.dump(demo_relabeled, f)
+            save_episode(demo_relabeled, episode_fn.replace(demo_dir, relabel_dir))
 
             stop_flask()
             flask_thread.join()

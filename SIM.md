@@ -275,7 +275,7 @@ collision_avoidance: true  # Enable collision avoidance
   - Swipe up/down → Gripper
   - See [here](https://tidybot2.github.io/docs/usage/#controlling-the-robot) for an example of how the interface works.
 - Press `End Episode` when you have successfully lifted the cube. There will be `stdout` feedback in the Terminal when `Success` is detected so you also know when to stop.
-- Demos saved as: `dev1/demoXXXXX.pkl`
+- Demos saved as: `dev1/demoXXXXX.pkl` (and `dev1/demoXXXXX.mp4` for visualization)
 
 > **Debugging**:
   - If you run into: `TypeError: cannot pickle 'weakref' object` on Mac, avoid visualizing the images live by changing L24 to `env = MujocoEnv(env_cfg, show_images=False)` in `record_sim.py`
@@ -319,6 +319,66 @@ python dataset_utils/annotate_salient_points.py
 Final labeled data: `dev1_relabeled/`  
 
 Rename this folder to something more descriptive, move it to `data/`, and update your training config to use this new dataset (i.e. call it `data/dev_cube` then update `dataset/path` in `cfgs/waypoint/cube_wbc.yaml`). Then, you can train and eval following the **Training** and **Evaluation** subsections above.
+
+---
+
+## YAM Robot
+
+HoMeR supports the YAM 6-DOF arm on the TidyBot2 mobile base as an alternative to the Kinova Gen3.
+All three sim tasks (cube, dishwasher, cabinet) are supported in both WBC and base-arm modes.
+
+### Environment configs
+
+| Task | WBC | Base+Arm |
+|------|-----|----------|
+| Cube | `envs/cfgs/cube_yam_wbc.yaml` | `envs/cfgs/cube_yam_base_arm.yaml` |
+| Dishwasher | `envs/cfgs/dishwasher_yam_wbc.yaml` | `envs/cfgs/dishwasher_yam_base_arm.yaml` |
+| Cabinet | `envs/cfgs/open_yam_wbc.yaml` | `envs/cfgs/open_yam_base_arm.yaml` |
+
+All YAM configs include `robot: yam` and `arm_reset_qpos: [0.0, 1.047, 1.047, 0.0, 0.0, 0.0]`.
+
+### Data collection
+
+Identical to the Kinova workflow — just pass a YAM config:
+
+```bash
+# Mac
+mjpython interactive_scripts/record_sim.py --env_cfg envs/cfgs/cube_yam_wbc.yaml
+
+# Linux
+python interactive_scripts/record_sim.py --env_cfg envs/cfgs/cube_yam_wbc.yaml
+```
+
+The iPhone teleoperation interface is unchanged:
+- Center press → EE control
+- Right press → Base control
+- Swipe up → close gripper / swipe down → open gripper
+
+Demos are saved to the `data_folder` specified in the config (default: `yam_dev1/`).
+
+### Replay
+
+```bash
+mjpython interactive_scripts/replay_sim.py --data_dir yam_dev1
+```
+
+### Gripper convention
+
+The YAM gripper uses the same `0 = open, 1 = closed` convention as the Kinova, so teleop and
+training code are identical. Internally, the YAM left-finger joint position is inverted
+(`gripper_pos = 1 - joint_pos / 0.041`) to match this convention.
+
+### Notes on WBC IK
+
+The YAM WBC IK solver (`envs/utils/wbc_ik_solver_yam.py`) uses `mink` with:
+- 6 arm DOFs (`joint1`–`joint6`)
+- Max arm velocity 80 deg/s for all joints
+- End-effector site: `pinch_site` on `link_6`
+- Collision avoidance between the `arm` subtree and `base_link`
+
+The base-arm IK solver (`envs/utils/arm_ik_solver_yam.py`) is a Jacobian damped-least-squares
+solver that fixes the base at the origin and solves only arm joints, matching the Kinova
+`arm_ik_solver.py` interface.
 
 ---
 

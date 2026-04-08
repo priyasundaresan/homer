@@ -57,7 +57,16 @@ class WebServer:
             address = '127.0.0.1'
         finally:
             s.close()
-        print(f'Starting server at {address}:5001')
+        url = f'http://{address}:5001'
+        try:
+            import qrcode
+            qr = qrcode.QRCode()
+            qr.add_data(url)
+            qr.make()
+            print(f'\nScan to connect ({url}):')
+            qr.print_ascii(invert=True)
+        except ImportError:
+            print(f'Starting server at {url}')
         self.socketio.run(self.app, host=TELEOP_HOST, port=5001)
 
 DEVICE_CAMERA_OFFSET = np.array([0.0, 0.02, -0.04])  # iPhone 14 Pro
@@ -241,8 +250,8 @@ class TeleopPolicy(Policy):
             time.sleep(0.01)
 
     def step(self, obs):
-        # Signal that user has ended episode
-        if not self.episode_ended and self.teleop_state == 'episode_ended':
+        # Signal end of episode
+        if not self.episode_ended and self.teleop_state == 'end_episode':
             self.episode_ended = True
             return 'end_episode'
 

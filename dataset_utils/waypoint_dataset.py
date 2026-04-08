@@ -4,12 +4,11 @@ from dataclasses import dataclass
 import random
 import numpy as np
 import torch
-import pickle
 from torch.utils.data import Dataset
 from scipy.spatial.transform import Rotation as R
 
 import common_utils
-from interactive_scripts.dataset_recorder import ActMode
+from interactive_scripts.dataset_recorder import ActMode, load_episode
 from models.pointnet2_utils import farthest_point_sample
 from models.triton_fps import triton_farthest_point_sample
 from envs.common_mj_env import MujocoEnvConfig
@@ -117,7 +116,7 @@ def augment_with_rotation(
     aug_action_quat = R.from_matrix(aug_action_rot_mat).as_quat()
     if aug_action_quat[3] < 0:
         np.negative(aug_action_quat, out=aug_action_quat)
-    aug_action_quat = torch.from_numpy().float()
+    aug_action_quat = torch.from_numpy(aug_action_quat).float()
 
     assert proprio.size(0) == 11, "proprio must be pos(3), quat(4), gripper(1), base(3)"
     aug_ee_pos = (proprio[:3] - mu) @ random_rot.T + mu
@@ -132,10 +131,10 @@ def augment_with_rotation(
     aug_proprio = torch.cat((aug_ee_pos, aug_ee_quat, proprio[7:]))
     assert aug_proprio.size() == proprio.size()
 
-    return aug_points, aug_action_pos, aug_action_euler, aug_proprio
+    return aug_points, aug_action_pos, aug_action_quat, aug_proprio
 
 def _load_files(root, split, split_seed, split_percent):
-    fns = list(sorted([fn for fn in os.listdir(root) if "pkl" in fn]))
+    fns = list(sorted([fn for fn in os.listdir(root) if fn.endswith(".pkl")]))
     fns = [os.path.join(root, fn) for fn in fns]
     split_idx = int(len(fns) * split_percent)
 
@@ -163,9 +162,7 @@ def _process_episodes(fns: list[str],
     max_num_points = 0
 
     for fn in fns:
-        #data = np.load(fn, allow_pickle=True)["arr_0"]
-        with open(fn, "rb") as fp:
-            data = pickle.load(fp)
+        data = load_episode(fn)
 
         # TODO(?): truncate if reward is available
         episode = []

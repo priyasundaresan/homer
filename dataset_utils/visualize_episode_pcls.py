@@ -3,7 +3,7 @@ import os
 import pyrallis
 import numpy as np
 from envs.utils.camera_utils import pcl_from_obs
-import pickle
+from interactive_scripts.dataset_recorder import load_episode
 
 # Globals to store state
 current_idx = 0
@@ -76,8 +76,7 @@ def visualize_pcl(episode_fn, _env_cfg):
     global demo, env_cfg, vis
     env_cfg = _env_cfg
 
-    with open(episode_fn, "rb") as fp:
-        demo = pickle.load(fp)
+    demo = load_episode(episode_fn)
 
     vis = o3d.visualization.VisualizerWithKeyCallback()
     vis.create_window()

@@ -16,6 +16,18 @@ class ActMode(Enum):
     Interpolate = 4
 
 
+def save_episode(episode, path):
+    """Save episode as pickle (path should end in .pkl)."""
+    with open(path, "wb") as f:
+        pickle.dump(episode, f)
+
+
+def load_episode(fn):
+    """Load a .pkl episode file as a list of timestep dicts."""
+    with open(fn, "rb") as f:
+        return pickle.load(f)
+
+
 class DatasetRecorder:
     def __init__(self, data_folder, vis_dim=(320, 240)):
         self.data_folder = data_folder
@@ -81,14 +93,14 @@ class DatasetRecorder:
         if "base1_depth" in obs:
             depth = obs["base1_depth"]  # shape (480, 640, 1)
             depth = np.squeeze(depth)  # shape (480, 640)
-        
+
             # Normalize to 0-255 and convert to uint8
             depth_norm = cv2.normalize(depth, None, 0, 255, cv2.NORM_MINMAX)
             depth_uint8 = depth_norm.astype(np.uint8)
-        
+
             # Apply a colormap to make it RGB
             depth_colored = cv2.applyColorMap(depth_uint8, cv2.COLORMAP_JET)
-        
+
             views.append(depth_colored)
         if views:
             self.images.append(views)
@@ -97,25 +109,25 @@ class DatasetRecorder:
         if save and len(episode) > 0:
             mp4_path = os.path.join(self.data_folder, f"demo{idx:05d}.mp4")
             demo_path = os.path.join(self.data_folder, f"demo{idx:05d}.pkl")
-            print(f"Saving to {mp4_path}...")
+            print(f"Saving to {demo_path}...")
 
-            vis_frames = []
-            for i in range(len(images)):
-                image_list = images[i]  # list of raw images for this step
-                resized = [cv2.resize(img, self.vis_dim) for img in image_list]
-                stacked = np.hstack(resized)
-                if episode[i]["mode"] == ActMode.Dense:
-                    stacked[:10, :, :] = (0, 255, 0)
-                vis_frames.append(cv2.cvtColor(stacked, cv2.COLOR_RGB2BGR))
+            if images:
+                vis_frames = []
+                for i in range(len(images)):
+                    image_list = images[i]  # list of raw images for this step
+                    resized = [cv2.resize(img, self.vis_dim) for img in image_list]
+                    stacked = np.hstack(resized)
+                    if episode[i]["mode"] == ActMode.Dense:
+                        stacked[:10, :, :] = (0, 255, 0)
+                    vis_frames.append(cv2.cvtColor(stacked, cv2.COLOR_RGB2BGR))
 
-            H, W, _ = vis_frames[0].shape
-            out = cv2.VideoWriter(mp4_path, cv2.VideoWriter_fourcc(*"avc1"), 12, (W, H))
-            for frame in vis_frames:
-                out.write(frame)
-            out.release()
+                H, W, _ = vis_frames[0].shape
+                out = cv2.VideoWriter(mp4_path, cv2.VideoWriter_fourcc(*"avc1"), 12, (W, H))
+                for frame in vis_frames:
+                    out.write(frame)
+                out.release()
 
-            with open(demo_path, "wb") as f:
-                pickle.dump(episode, f)
+            save_episode(episode, demo_path)
 
             print(f"Finished saving demo{idx:05d}")
         else:

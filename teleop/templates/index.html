@@ -34,6 +34,7 @@
         margin: 0;
         touch-action: none;
       }
+
     </style>
   </head>
   <body>
@@ -41,6 +42,7 @@
       <header></header>
       <p><span id="info"></span></p>
     </div>
+
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
     <script type="text/javascript">
       // Random device ID
@@ -51,7 +53,7 @@
         constructor(bufferSize) {
           this.bufferSize = bufferSize;
           this.bufferIndex = 0;
-          this.rttArray = new Array(bufferSize).fill(0); // Initialize the circular buffer
+          this.rttArray = new Array(bufferSize).fill(0);
         }
 
         calculate(rtt) {
@@ -135,7 +137,7 @@
 
       function onPrepareEndSession() {
         // Let the server know user has ended the episode
-        const data = { timestamp: Date.now(), state_update: 'episode_ended' };
+        const data = { timestamp: Date.now(), state_update: 'end_episode' };
         socket.send(data);
       }
 

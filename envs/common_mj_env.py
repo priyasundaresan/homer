@@ -1,11 +1,11 @@
 import math
 import os
 import pyrallis
+from multiprocessing import get_context as _mp_get_context, Pipe as _mp_Pipe  # for teleop display subprocess
 import random
 from dataclasses import dataclass, field
 import multiprocessing as mp
 import time
-import pickle
 from multiprocessing import shared_memory
 from threading import Thread
 from itertools import count
@@ -20,11 +20,30 @@ from envs.utils.arm_ik_solver import IKSolver
 from ruckig import InputParameter, OutputParameter, Result, Ruckig
 from scipy.spatial.transform import Rotation as R
 from constants import POLICY_CONTROL_PERIOD
-from interactive_scripts.dataset_recorder import ActMode, DatasetRecorder
+from interactive_scripts.dataset_recorder import ActMode, DatasetRecorder, load_episode
 from teleop.policies import TeleopPolicy
 from envs.utils.camera_utils import make_tf
 import common_utils
 import pdb
+
+
+def _teleop_display_worker(conn):
+    """Spawned subprocess: displays wrist camera frames via cv2 (works on Mac, not under mjpython)."""
+    import cv2
+    import numpy as np
+    cv2.namedWindow('Wrist View', cv2.WINDOW_NORMAL)
+    cv2.resizeWindow('Wrist View', 640, 480)
+    while True:
+        try:
+            frame = conn.recv()
+        except EOFError:
+            break
+        if frame is None:
+            break
+        cv2.imshow('Wrist View', cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+        cv2.waitKey(1)
+    cv2.destroyAllWindows()
+
 
 class BaseController:
     def __init__(self, qpos, qvel, ctrl, timestep):
@@ -75,33 +94,42 @@ class BaseController:
 
 
 class ArmController:
-    def __init__(self, qpos, qvel, ctrl, qpos_gripper, ctrl_gripper, timestep, reset_qpos, wbc=False):
+    def __init__(self, qpos, qvel, ctrl, qpos_gripper, ctrl_gripper, timestep, reset_qpos, wbc=False,
+                 arm_dofs=7, gripper_scale=255.0, gripper_offset=0.0, ik_solver=None):
         self.qpos = qpos
         self.qvel = qvel
         self.ctrl = ctrl
         self.qpos_gripper = qpos_gripper
         self.ctrl_gripper = ctrl_gripper
         self.reset_qpos = reset_qpos
+        self.gripper_scale = gripper_scale
+        self.gripper_offset = gripper_offset
 
         # OTG (online trajectory generation)
-        num_dofs = 7
+        num_dofs = arm_dofs
         self.last_command_time = None
         self.otg = Ruckig(num_dofs, timestep)
         self.otg_inp = InputParameter(num_dofs)
         self.otg_out = OutputParameter(num_dofs)
-        self.otg_inp.max_velocity = 4 * [math.radians(80)] + 3 * [math.radians(140)]
-        self.otg_inp.max_acceleration = 4 * [math.radians(240)] + 3 * [math.radians(450)]
+        if arm_dofs == 7:
+            # Kinova Gen3 velocity/acceleration limits
+            self.otg_inp.max_velocity = 4 * [math.radians(80)] + 3 * [math.radians(140)]
+            self.otg_inp.max_acceleration = 4 * [math.radians(240)] + 3 * [math.radians(450)]
+        else:
+            # Generic limits for other arm DOF counts (e.g. YAM 6-DOF)
+            self.otg_inp.max_velocity = num_dofs * [math.radians(80)]
+            self.otg_inp.max_acceleration = num_dofs * [math.radians(240)]
         self.otg_res = None
 
         self.wbc = wbc
         if not self.wbc:
-            self.ik_solver = IKSolver(ee_offset=0.12)
+            self.ik_solver = ik_solver if ik_solver is not None else IKSolver(ee_offset=0.12)
 
     def reset(self):
         # Initialize arm
         self.qpos[:] = np.array(self.reset_qpos)
         self.ctrl[:] = self.qpos
-        self.ctrl_gripper[:] = 0.0
+        self.ctrl_gripper[:] = self.gripper_offset
 
         # Initialize OTG
         self.last_command_time = time.time()
@@ -129,8 +157,10 @@ class ArmController:
                 self.otg_res = Result.Working
 
             if 'gripper_pos' in command:
-                # Set target gripper pos
-                self.ctrl_gripper[:] = 255.0 * command['gripper_pos']  # fingers_actuator, ctrlrange [0, 255]
+                # ctrl = offset + scale * gripper_pos
+                # Kinova: offset=0,     scale=255   → 0=open,  255=closed
+                # YAM:    offset=0.041, scale=-0.041 → 0.041=open, 0=closed
+                self.ctrl_gripper[:] = self.gripper_offset + self.gripper_scale * command['gripper_pos']
 
         # Maintain current pose if command stream is disrupted
         if time.time() - self.last_command_time > 2.5 * POLICY_CONTROL_PERIOD:
@@ -312,7 +342,8 @@ class Renderer:
         self.mjr_context = None
 
 class CommonMujocoSim:
-    def __init__(self, task, mjcf_path, command_queue, shm_state, show_viewer=True):
+    def __init__(self, task, mjcf_path, command_queue, shm_state, show_viewer=True,
+                 arm_body_name='gen3/base_link', gripper_joint_range=0.8):
         self.model = mujoco.MjModel.from_xml_path(mjcf_path)
         self.model.vis.map.znear = 0.05
         self.model.vis.map.zfar = 8.0
@@ -321,14 +352,28 @@ class CommonMujocoSim:
         self.show_viewer = show_viewer
 
         self.task = task
-        assert self.task in ["cube", "cube_cam_mounts", "cube_size", "cube_distractor", "cube_specified", "open", "dishwasher"]
+        assert self.task in ["cube", "cube_cam_mounts", "cube_size", "cube_distractor", "cube_specified", "open", "dishwasher", "plate_dishrack"]
 
-        # Enable gravity compensation for everything except objects
+        # Enable gravity compensation for robot bodies only; task objects fall normally.
+        # We walk the full body tree and disable gravcomp for any body that is a
+        # descendant of 'interactive_obj' (the free-floating task object root).
         self.model.body_gravcomp[:] = 1.0
         body_names = {self.model.body(i).name for i in range(self.model.nbody)}
-        for object_name in ['interactive_obj']:
-            if object_name in body_names:
-                self.model.body_gravcomp[self.model.body(object_name).id] = 0.0
+        object_roots = ['interactive_obj']
+        for root_name in object_roots:
+            if root_name not in body_names:
+                continue
+            # Disable gravcomp for the root and all its descendants
+            root_id = self.model.body(root_name).id
+            for i in range(self.model.nbody):
+                body = self.model.body(i)
+                # Walk up the parent chain to see if this body is under root_id
+                bid = i
+                while bid != 0:
+                    if bid == root_id:
+                        self.model.body_gravcomp[i] = 0.0
+                        break
+                    bid = self.model.body(bid).parentid
 
         # Cache references to array slices
         self.base_dofs = base_dofs = self.model.body('base_link').jntnum.item()
@@ -342,15 +387,17 @@ class CommonMujocoSim:
         # Shared memory state for observations
         self.shm_state = ShmState(existing_instance=shm_state)
 
-        # Variables for calculating arm pos and quat
+        # Variables for calculating arm pos and quat in the base-local frame
         site_id = self.model.site('pinch_site').id
         self.site_xpos = self.data.site(site_id).xpos
         self.site_xmat = self.data.site(site_id).xmat
         self.site_quat = np.empty(4)
-        self.base_height = self.model.body('gen3/base_link').pos[2]
-        self.arm_forward = self.model.body('gen3/base_link').pos[0]
+        self.base_height = self.model.body(arm_body_name).pos[2]
+        self.arm_forward = self.model.body(arm_body_name).pos[0]
         self.base_rot_axis = np.array([0.0, 0.0, 1.0])
         self.base_quat_inv = np.empty(4)
+        # Range of the primary gripper joint (used to normalise gripper_pos to [0, 1])
+        self.gripper_joint_range = gripper_joint_range
 
     def update_shm_state(self):
         # Update base pose
@@ -370,8 +417,8 @@ class CommonMujocoSim:
         # self.shm_state.arm_quat[:] = self.site_quat
         mujoco.mju_mulQuat(self.shm_state.arm_quat, self.base_quat_inv, self.site_quat)  # Arm quat in local frame
 
-        # Update gripper pos
-        self.shm_state.gripper_pos[:] = self.qpos_gripper / 0.8  # right_driver_joint, joint range [0, 0.8]
+        # Update gripper pos (normalise to [0, 1] using the robot-specific joint range)
+        self.shm_state.gripper_pos[:] = self.qpos_gripper / self.gripper_joint_range
 
         # Notify reset() function that state has been initialized
         self.shm_state.initialized[:] = 1.0
@@ -518,6 +565,20 @@ class CommonMujocoSim:
                 + 3
             ] += randomized_position
 
+        elif self.task == "plate_dishrack":
+            # Randomize plate position on the table, in front of the dishrack.
+            # Table surface at z=0.80; plate half-height=0.003 so center at z=0.803.
+            # Dishrack fixed at x=0.90, y=0; its open face is at x≈0.71.
+            plate_pos = np.array([
+                np.random.uniform(0.5, 0.80),
+                np.random.uniform(-0.15, -0.35),  # -y side; rack is on +y side
+                0.90,   # drop from 10cm above table surface (z=0.80) so it settles cleanly
+            ])
+            joint_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "interactive_obj_freejoint")
+            qpos_adr = self.model.jnt_qposadr[joint_id]
+            self.data.qpos[qpos_adr : qpos_adr + 3] = plate_pos
+            mujoco.mj_forward(self.model, self.data)
+
     def is_success(self):
         if self.task in ["cube", "cube_cam_mounts", "cube_size", "cube_distractor"]:
             ### Check whether the cube is lifted off the floor by 10cm
@@ -544,6 +605,17 @@ class CommonMujocoSim:
             assert -np.pi / 2 < door_angle < 0.1
             angle_thresh = -np.pi / 8
             reward = door_angle < angle_thresh
+        elif self.task == "plate_dishrack":
+            # Success when plate center is inside the dishrack interior.
+            # Dishrack at x=0.90, y=0, z=0.80. Rack floor at z=0.82; plate center in rack ~0.823.
+            plate_body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "interactive_obj")
+            plate_pos = self.data.xpos[plate_body_id]
+            in_rack = (
+                0.72 < plate_pos[0] < 1.08
+                and 0.03 < plate_pos[1] < 0.37   # rack at y=0.20, interior y in (0.03, 0.37)
+                and plate_pos[2] > 0.850
+            )
+            reward = float(in_rack)
         return reward
 
     def reset(self):
@@ -578,6 +650,7 @@ class MujocoEnvConfig:
     task: str
     data_folder: str
     is_sim: int = 1
+    robot: str = "kinova"  # "kinova" or "yam"
     arm_reset_qpos: list[float] = field(default_factory=lambda: [
         0.0,
         -0.34906585,
@@ -608,24 +681,33 @@ class CommonMujocoEnv:
 
         self.task = self.cfg.task
         
-        assert self.task in ["cube", "cube_cam_mounts", "cube_size", "cube_distractor", "cube_specified", "open", "dishwasher"]
+        assert self.task in ["cube", "cube_cam_mounts", "cube_size", "cube_distractor", "cube_specified", "open", "dishwasher", "plate_dishrack"]
         if self.task in ["cube", "cube_cam_mounts", "cube_size", "cube_distractor", "cube_specified"]:
             self.max_num_step = 325
         elif self.task == "open":
             self.max_num_step = 800
         elif self.task == "dishwasher":
             self.max_num_step = 1000
+        elif self.task == "plate_dishrack":
+            self.max_num_step = 500
 
+        robot = getattr(self.cfg, 'robot', 'kinova')
         TASK_TO_MJCF_PATH = {
-            'cube': "mj_assets/stanford_tidybot2/cube.xml",
-            'cube_cam_mounts': "mj_assets/stanford_tidybot2/cube_cam_mounts.xml",
-            'cube_size': "mj_assets/stanford_tidybot2/cube_size.xml",
-            'cube_distractor': "mj_assets/stanford_tidybot2/cube_distractor.xml",
-            'cube_specified': "mj_assets/stanford_tidybot2/cube_specified.xml",
-            'open': "mj_assets/stanford_tidybot2/open.xml",
-            'dishwasher': "mj_assets/stanford_tidybot2/dishwasher.xml"
+            # Kinova Gen3 + 2f85 gripper
+            ('cube',          'kinova'): "mj_assets/stanford_tidybot2/cube.xml",
+            ('cube_cam_mounts','kinova'): "mj_assets/stanford_tidybot2/cube_cam_mounts.xml",
+            ('cube_size',     'kinova'): "mj_assets/stanford_tidybot2/cube_size.xml",
+            ('cube_distractor','kinova'): "mj_assets/stanford_tidybot2/cube_distractor.xml",
+            ('cube_specified', 'kinova'): "mj_assets/stanford_tidybot2/cube_specified.xml",
+            ('open',          'kinova'): "mj_assets/stanford_tidybot2/open.xml",
+            ('dishwasher',    'kinova'): "mj_assets/stanford_tidybot2/dishwasher.xml",
+            ('plate_dishrack','kinova'): "mj_assets/stanford_tidybot2/plate_dishrack.xml",
+            # YAM arm
+            ('cube',          'yam'):    "mj_assets/stanford_tidybot2/cube_yam.xml",
+            ('dishwasher',    'yam'):    "mj_assets/stanford_tidybot2/dishwasher_yam.xml",
+            ('open',          'yam'):    "mj_assets/stanford_tidybot2/open_yam.xml",
         }
-        self.mjcf_path = TASK_TO_MJCF_PATH[self.cfg.task]
+        self.mjcf_path = TASK_TO_MJCF_PATH[(self.cfg.task, robot)]
 
         self.shm_state = ShmState()
         self.shm_cam_params = []
@@ -649,6 +731,10 @@ class CommonMujocoEnv:
             # Start visualizer loop
             self.visualizer_process = mp.Process(target=self.visualizer_loop, daemon=True)
             self.visualizer_process.start()
+
+        # Will be lazily started on first collect_episode (after physics_proc is spawned)
+        self._display_conn = None
+        self._display_proc = None
 
     def _dump_or_check_env_cfg(self):
         cfg_path = os.path.join(self.data_folder, "env_cfg.yaml")
@@ -807,6 +893,15 @@ class CommonMujocoEnv:
         episode_ended = False
         start_time = time.time()
 
+        # Spawn wrist display process once (kept alive across episodes)
+        if self._display_conn is None and self.render_images and 'wrist' in self.camera_names:
+            _parent_conn, _child_conn = _mp_Pipe()
+            _ctx = _mp_get_context('spawn')
+            self._display_proc = _ctx.Process(target=_teleop_display_worker, args=(_child_conn,), daemon=True)
+            self._display_proc.start()
+            _child_conn.close()
+            self._display_conn = _parent_conn
+
         prev_obs = self.get_obs()  # Only capture observations at 10Hz
 
         for step_idx in count():
@@ -817,6 +912,13 @@ class CommonMujocoEnv:
 
             # Get latest observation
             obs = self.get_obs()
+
+            # Send wrist frame to persistent display subprocess
+            if self._display_conn is not None and 'wrist_image' in obs:
+                try:
+                    self._display_conn.send(obs['wrist_image'])
+                except BrokenPipeError:
+                    self._display_conn = None
 
             # Get action
             processed_obs = obs.copy()
@@ -878,10 +980,8 @@ class CommonMujocoEnv:
             # Episode ended
             elif not episode_ended and action == 'end_episode':
                 episode_ended = True
-                print('Episode ended')
-
                 self.recorder.end_episode(save=True)
-                print('Teleop is now active. Press "Reset env" in the web app when ready to proceed.')
+                print('Teleop is now active. Press "Reset env" in the web app when ready.')
 
             # Ready for env reset
             elif action == 'reset_env':
@@ -892,12 +992,10 @@ class CommonMujocoEnv:
     def replay_episode(self, episode_fn, replay_mode="absolute"):
         self._dump_or_check_env_cfg()
         assert(replay_mode in ["absolute", "delta"])
-        #demo = np.load(episode_fn, allow_pickle=True)["arr_0"]
-        with open(episode_fn, "rb") as fp:
-            demo = pickle.load(fp)
+        demo = load_episode(episode_fn)
 
         # Reset and seed based on episode idx
-        self.seed(int(episode_fn.split("demo")[1].split(".pkl")[0]))
+        self.seed(int(os.path.splitext(os.path.basename(episode_fn))[0][len("demo"):]))
         self.reset()
 
         start_time = time.time()
